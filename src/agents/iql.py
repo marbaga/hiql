@@ -99,16 +99,13 @@ def create_learner(
                  observations: jnp.ndarray,
                  actions: jnp.ndarray,
                  value_def,
-                 actor_lr: float = 3e-4,
-                 value_lr: float = 3e-4,
-                 critic_lr: float = 3e-4,
+                 lr: float = 3e-4,
                  value_tx=None,
                  hidden_dims: Sequence[int] = (256, 256),
                  discount: float = 0.99,
                  tau: float = 0.005,
                  expectile: float = 0.8,
                  temperature: float = 0.1,
-                 dropout_rate: Optional[float] = None,
                  max_steps: Optional[int] = None,
                  opt_decay_schedule: str = "cosine",
             **kwargs):
@@ -123,23 +120,23 @@ def create_learner(
             log_std_min=-5.0, state_dependent_std=False, tanh_squash_distribution=False)
 
         if opt_decay_schedule == "cosine":
-            schedule_fn = optax.cosine_decay_schedule(-actor_lr, max_steps)
+            schedule_fn = optax.cosine_decay_schedule(-lr, max_steps)
             actor_tx = optax.chain(optax.scale_by_adam(),
                                     optax.scale_by_schedule(schedule_fn))
         else:
-            actor_tx = optax.adam(learning_rate=actor_lr)
+            actor_tx = optax.adam(learning_rate=lr)
 
         actor_params = actor_def.init(actor_key, observations)['params']
         actor = TrainState.create(actor_def, actor_params, tx=actor_tx)
 
         critic_def = ensemblize(Critic, num_qs=2)(hidden_dims)
         critic_params = critic_def.init(critic_key, observations, actions)['params']
-        critic = TrainState.create(critic_def, critic_params, tx=optax.adam(learning_rate=critic_lr))
+        critic = TrainState.create(critic_def, critic_params, tx=optax.adam(learning_rate=lr))
         # target_critic = TrainState.create(critic_def, critic_params)
         
         value_params = value_def.init(value_key, observations)['params']
         if value_tx is None:
-            value_tx = optax.adam(learning_rate=value_lr)
+            value_tx = optax.adam(learning_rate=lr)
         value = TrainState.create(value_def, value_params, tx=value_tx)
         target_value = TrainState.create(value_def, value_params)
 
@@ -148,22 +145,3 @@ def create_learner(
         ))
 
         return IQLAgent(rng, critic=critic, value=value, target_value=target_value, actor=actor, config=config)
-
-def get_default_config():
-    config = ml_collections.ConfigDict()
-
-    config.actor_lr = 3e-4
-    config.value_lr = 3e-4
-    config.critic_lr = 3e-4
-
-    config.hidden_dims = (256, 256)
-
-    config.discount = 0.99
-
-    config.expectile = 0.9  # The actual tau for expectiles.
-    config.temperature = 10.0
-    config.dropout_rate = None
-
-    config.tau = 0.005  # For soft target updates.
-
-    return config

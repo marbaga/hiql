@@ -3,19 +3,12 @@ Very specific code for debugging the antmaze environment.
 """
 import matplotlib
 matplotlib.use('Agg')
-
-import matplotlib.pyplot as plt
-import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
-from mpl_toolkits.axes_grid1 import make_axes_locatable
-
 import numpy as np
-import functools as ft
-
-# from src import roomworld_utils
 from .d4rl_ant import get_canvas_image
 import os.path as osp
+
 
 class Visualizer:
     def __init__(self, env_name, viz_env, dataset, discount):
@@ -144,15 +137,13 @@ class Visualizer:
         return interpn((self.data['Y'], self.data['X']), self.data['pV'], final_points, method='linear', bounds_error=False, fill_value=-300.0)
 
     def get_distance_metrics(self, trajs):
-        import wandb
+        import aim
         distances = self.get_distances(trajs)
-        bins = np.arange(self.data['pV'].min(), self.data['pV'].max(), 20)
-        hist = np.histogram(distances, bins)
         metrics = {
             'average_distance': np.mean(distances),
             'pct_within_10': np.mean(distances > -10),
             'pct_within_20': np.mean(distances > -20),
             'median_distance': np.median(distances),
-            'dist_hist': wandb.Histogram(np_histogram=hist),
+            'dist_hist': aim.Distribution(distances),
         }
         return metrics

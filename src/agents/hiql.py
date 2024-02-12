@@ -317,17 +317,3 @@ def create_learner(
         ))
 
         return JointTrainAgent(rng, network=network, critic=None, value=None, target_value=None, actor=None, config=config)
-
-
-def get_default_config():
-    config = ml_collections.ConfigDict({
-        'lr': 3e-4,
-        'actor_hidden_dims': (256, 256),
-        'value_hidden_dims': (256, 256),
-        'discount': 0.99,
-        'temperature': 1.0,
-        'tau': 0.005,
-        'pretrain_expectile': 0.7,
-    })
-
-    return config

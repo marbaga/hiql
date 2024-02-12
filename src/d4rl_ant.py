@@ -1,21 +1,18 @@
 import matplotlib
 matplotlib.use('Agg')
 from matplotlib import patches
-
-import matplotlib.pyplot as plt
-import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
-from functools import partial
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-
+import matplotlib.gridspec as gridspec
+import math
+import functools as ft
+from functools import partial
+import numpy as np
 import gym
 import d4rl
-import numpy as np
-import functools as ft
-import math
 from jaxrl_m.dataset import Dataset
-import matplotlib.gridspec as gridspec
+
 
 def get_canvas_image(canvas):
     canvas.draw() 

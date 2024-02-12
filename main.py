@@ -12,10 +12,10 @@ from jaxrl_m.evaluation import supply_rng, evaluate_with_trajectories
 from src import d4rl_ant, viz_utils
 from src.agents import hiql as learner
 from src.gc_dataset import GCSDataset
-from src.utils import record_video, Logger
+from src.utils import Logger
 from src.envs import make_env, get_example_trajectory
-from cluster_utils import cluster_main
-import wandb
+from cluster_utils import cluster_main, announce_fraction_finished
+import aim
 
 
 @jax.jit
@@ -97,7 +97,7 @@ def main(**kwargs):
             if 'procgen' in kwargs.env_name:
                 eval_metrics = {}
                 for goal_info in goal_infos:
-                    eval_info, trajs, renders = evaluate_with_trajectories(
+                    eval_info, trajs, _ = evaluate_with_trajectories(
                         policy_fn, high_policy_fn, policy_rep_fn, env, env_name=kwargs.env_name, num_episodes=kwargs.eval_episodes,
                         base_observation=base_observation, num_video_episodes=0,
                         use_waypoints=kwargs.use_waypoints,
@@ -106,7 +106,7 @@ def main(**kwargs):
                     )
                     eval_metrics.update({f'evaluation/level{goal_info["eval_level_name"]}_{k}': v for k, v in eval_info.items()})
             else:
-                eval_info, trajs, renders = evaluate_with_trajectories(
+                eval_info, trajs, _ = evaluate_with_trajectories(
                     policy_fn, high_policy_fn, policy_rep_fn, env, env_name=kwargs.env_name, num_episodes=kwargs.eval_episodes,
                     base_observation=base_observation, num_video_episodes=kwargs.num_video_episodes,
                     use_waypoints=kwargs.use_waypoints,
@@ -115,27 +115,24 @@ def main(**kwargs):
                 )
                 eval_metrics = {f'evaluation/{k}': v for k, v in eval_info.items()}
 
-                if kwargs.num_video_episodes > 0:
-                    video = record_video('Video', i, renders=renders)
-                    eval_metrics['video'] = video
+                # if kwargs.num_video_episodes > 0:
+                #     video = record_video('Video', i, renders=renders)
+                #     eval_metrics['video'] = video
 
             traj_metrics = get_traj_v(agent, example_trajectory)
-            # value_viz = viz_utils.make_visual_no_image(traj_metrics)
-            value_viz = viz_utils.make_visual_no_image(
-                traj_metrics,
-                [partial(viz_utils.visualize_metric, metric_name=k) for k in traj_metrics.keys()]
-            )
-            eval_metrics['value_traj_viz'] = wandb.Image(value_viz)
+            value_viz = viz_utils.make_visual_no_image(traj_metrics)
+            eval_metrics['value_traj_viz'] = aim.Image(value_viz)
 
             if kwargs.env_name.startswith('antmaze') and 'large' in kwargs.env_name:
                 traj_image = d4rl_ant.trajectory_image(viz_env, viz_dataset, trajs)
-                eval_metrics['trajectories'] = wandb.Image(traj_image)
+                eval_metrics['trajectories'] = aim.Image(traj_image)
                 new_metrics_dist = viz.get_distance_metrics(trajs)
                 eval_metrics.update({f'debugging/{k}': v for k, v in new_metrics_dist.items()})
                 image_v = d4rl_ant.gcvalue_image(viz_env, viz_dataset, partial(get_v, agent))
-                eval_metrics['v'] = wandb.Image(image_v)
+                eval_metrics['v'] = aim.Image(image_v)
 
             logger.log(eval_metrics, step=i, mode='eval')
+            announce_fraction_finished(i/kwargs.pretrain_steps)
 
         if i % kwargs.save_interval == 0:
             fname = os.path.join(kwargs.working_dir, f'params_{i}.pkl')
@@ -147,7 +144,8 @@ def main(**kwargs):
                 }, f)
 
     logger.close()
-    return {}
+    return {k: v for k, v in eval_metrics.items() if not isinstance(v, (aim.Image, aim.Distribution))}
+
 
 if __name__ == '__main__':
     main()

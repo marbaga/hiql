@@ -1,9 +1,7 @@
-from typing import Iterable, Optional
 import os
 import numpy as np
 import jax.numpy as jnp
-import wandb
-from aim import Run
+import aim
 
 Array = jnp.ndarray
 
@@ -51,7 +49,7 @@ def save_video(label, step, tensor, fps=15, n_cols=None):
         tensor = _to_uint8(tensor)
 
     tensor = tensor.transpose(0, 3, 1, 2)
-    return wandb.Video(tensor, fps=15, format='mp4')
+    return tensor  # wandb.Video(tensor, fps=15, format='mp4')
 
 
 def record_video(label, step, renders=None, n_cols=None, skip_frames=1):
@@ -69,20 +67,20 @@ class Logger:
         self.path = {k: os.path.join(kwargs.working_dir, f'{k}.csv') for k in ['train', 'eval']}
         self.header = {'train': None, 'eval': None}
         self.file = {'train': None, 'eval': None}
-        self.disallowed_types = (wandb.Image, wandb.Video, wandb.Histogram)
-        self.run = Run(repo = kwargs.working_dir, experiment='test')
+        self.disallowed_types = (aim.Image, aim.Distribution)
+        self.run = aim.Run(repo = kwargs.working_dir, experiment='test')
         self.run['hparams'] = kwargs.to_dict()
 
     def log(self, row, step, mode='eval'):
         assert mode in ['eval', 'train']
         row['step'] = step
+        [self.run.track(v, name=k) for k, v in row.items()]
         if self.file[mode] is None:
             self.file[mode] = open(self.path[mode], 'w')
             if self.header[mode] is None:
                 self.header[mode] = [k for k, v in row.items() if not isinstance(v, self.disallowed_types)]
                 self.file[mode].write(','.join(self.header[mode]) + '\n')
         filtered_row = {k: v for k, v in row.items() if not isinstance(v, self.disallowed_types)}
-        [self.run.track(v, name=k) for k, v in filtered_row.items()]
         self.file[mode].write(','.join([str(filtered_row.get(k, '')) for k in self.header[mode]]) + '\n')
         self.file[mode].flush()
 

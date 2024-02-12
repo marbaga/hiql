@@ -1,15 +1,11 @@
 import matplotlib
-
 matplotlib.use('Agg')
-
-import matplotlib.pyplot as plt
-import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
-
-import functools as ft
 import matplotlib.gridspec as gridspec
 import math
+import numpy as np
+from functools import partial
 
 
 def most_squarelike(n):
@@ -19,11 +15,10 @@ def most_squarelike(n):
             return (c, int(math.ceil(n / c)))
         c -= 1
 
-
-def make_visual_no_image(metrics, visualization_methods=[]):
+def make_visual_no_image(metrics):
+    visualization_methods = [partial(visualize_metric, metric_name=k) for k in metrics.keys()]
     w, h = most_squarelike(len(visualization_methods))
     gs = gridspec.GridSpec(h, w)
-
     fig = plt.figure(tight_layout=True)
     canvas = FigureCanvas(fig)
 

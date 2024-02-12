@@ -94,3 +94,14 @@ python main.py --run_group EXP --seed 0 --env_name procgen-500 --pretrain_steps 
 ## License
 
 MIT
+
+
+## Useful commands
+
+```
+pip install -r requirements.txt --no-deps
+pip install pip install "jax[cuda11_cudnn82]==0.4.3" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+export LD_LIBRARY_PATH=/is/software/nvidia/cudnn-8.6.0-cu11.7/lib:/is/software/nvidia/cuda-11.7/lib64:/is/sg2/mbagatella/.mujoco/mujoco210/bin
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/lib/nvidia
+export XLA_PYTHON_CLIENT_MEM_FRACTION=.8
+```
