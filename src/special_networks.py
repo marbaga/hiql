@@ -122,6 +122,8 @@ class HierarchicalActorCritic(nn.Module):
     encoders: Dict[str, nn.Module]
     networks: Dict[str, nn.Module]
     use_waypoints: int
+    sorb_hl: bool
+    sorb_ll: bool
 
     def value(self, observations, goals, **kwargs):
         state_reps = get_rep(self.encoders['value_state'], targets=observations)
@@ -135,31 +137,20 @@ class HierarchicalActorCritic(nn.Module):
 
     def actor(self, observations, goals, low_dim_goals=False, state_rep_grad=True, goal_rep_grad=True, **kwargs):
         state_reps = get_rep(self.encoders['policy_state'], targets=observations)
-        if not state_rep_grad:
-            state_reps = jax.lax.stop_gradient(state_reps)
-
+        if not state_rep_grad: state_reps = jax.lax.stop_gradient(state_reps)
         if low_dim_goals:
             goal_reps = goals
         else:
-            if self.use_waypoints:
-                # Use the value_goal representation
-                goal_reps = get_rep(self.encoders['value_goal'], targets=goals, bases=observations)
-            else:
-                goal_reps = get_rep(self.encoders['policy_goal'], targets=goals, bases=observations)
-            if not goal_rep_grad:
-                goal_reps = jax.lax.stop_gradient(goal_reps)
-
+            # Maybe use the value_goal representation
+            goal_reps = get_rep(self.encoders['value_goal' if self.use_waypoints else 'policy_goal'], targets=goals, bases=observations)
+            if not goal_rep_grad: goal_reps = jax.lax.stop_gradient(goal_reps)
         return self.networks['actor'](jnp.concatenate([state_reps, goal_reps], axis=-1), **kwargs)
 
     def high_actor(self, observations, goals, state_rep_grad=True, goal_rep_grad=True, **kwargs):
         state_reps = get_rep(self.encoders['high_policy_state'], targets=observations)
-        if not state_rep_grad:
-            state_reps = jax.lax.stop_gradient(state_reps)
-
+        if not state_rep_grad: state_reps = jax.lax.stop_gradient(state_reps)
         goal_reps = get_rep(self.encoders['high_policy_goal'], targets=goals, bases=observations)
-        if not goal_rep_grad:
-            goal_reps = jax.lax.stop_gradient(goal_reps)
-
+        if not goal_rep_grad: goal_reps = jax.lax.stop_gradient(goal_reps)
         return self.networks['high_actor'](jnp.concatenate([state_reps, goal_reps], axis=-1), **kwargs)
 
     def value_goal_encoder(self, targets, bases, **kwargs):
@@ -170,8 +161,7 @@ class HierarchicalActorCritic(nn.Module):
         return get_rep(self.encoders['policy_goal'], targets=targets, bases=bases)
 
     def __call__(self, observations, goals):
-        # Only for initialization
-        rets = {
+        rets = {  # Only for initialization
             'value': self.value(observations, goals),
             'target_value': self.target_value(observations, goals),
             'actor': self.actor(observations, goals),

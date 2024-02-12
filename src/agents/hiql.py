@@ -1,20 +1,14 @@
 import copy
-
-from jaxrl_m.typing import *
-
 import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
-from jaxrl_m.common import TrainState, target_update
-from jaxrl_m.networks import Policy, Critic, ensemblize, DiscretePolicy
-
+from jaxrl_m.typing import *
+from jaxrl_m.common import TrainState
+from jaxrl_m.networks import Policy, DiscretePolicy
 import flax
-import flax.linen as nn
 from flax.core import freeze, unfreeze
-import ml_collections
-from . import iql
-from src.special_networks import Representation, HierarchicalActorCritic, RelativeRepresentation, MonolithicVF
+from src.special_networks import HierarchicalActorCritic, RelativeRepresentation, MonolithicVF
 
 
 def expectile_loss(adv, diff, expectile=0.7):
@@ -23,27 +17,17 @@ def expectile_loss(adv, diff, expectile=0.7):
 
 
 def compute_actor_loss(agent, batch, network_params):
-    if agent.config['use_waypoints']:  # Use waypoint states as goals (for hierarchical policies)
-        cur_goals = batch['low_goals']
-    else:  # Use randomized last observations as goals (for flat policies)
-        cur_goals = batch['high_goals']
-    v1, v2 = agent.network(batch['observations'], cur_goals, method='value')
-    nv1, nv2 = agent.network(batch['next_observations'], cur_goals, method='value')
-    v = (v1 + v2) / 2
-    nv = (nv1 + nv2) / 2
-
+    # Use waypoint states as goals (for hierarchical policies)
+    cur_goals = batch['low_goals' if agent.config['use_waypoints'] else 'high_goals']
+    v = sum(agent.network(batch['observations'], cur_goals, method='value')) / 2
+    nv = sum(agent.network(batch['next_observations'], cur_goals, method='value')) / 2
     adv = nv - v
     exp_a = jnp.exp(adv * agent.config['temperature'])
     exp_a = jnp.minimum(exp_a, 100.0)
-
-    if agent.config['use_waypoints']:
-        goal_rep_grad = agent.config['policy_train_rep']
-    else:
-        goal_rep_grad = True
+    goal_rep_grad = agent.config['policy_train_rep'] if agent.config['use_waypoints'] else True
     dist = agent.network(batch['observations'], cur_goals, state_rep_grad=True, goal_rep_grad=goal_rep_grad, method='actor', params=network_params)
     log_probs = dist.log_prob(batch['actions'])
     actor_loss = -(exp_a * log_probs).mean()
-
     return actor_loss, {
         'actor_loss': actor_loss,
         'adv': adv.mean(),
@@ -54,16 +38,11 @@ def compute_actor_loss(agent, batch, network_params):
 
 
 def compute_high_actor_loss(agent, batch, network_params):
-    cur_goals = batch['high_goals']
-    v1, v2 = agent.network(batch['observations'], cur_goals, method='value')
-    nv1, nv2 = agent.network(batch['high_targets'], cur_goals, method='value')
-    v = (v1 + v2) / 2
-    nv = (nv1 + nv2) / 2
-
+    v = sum(agent.network(batch['observations'], batch['high_goals'], method='value')) / 2
+    nv = sum(agent.network(batch['next_observations'], batch['high_goals'], method='value')) / 2
     adv = nv - v
     exp_a = jnp.exp(adv * agent.config['high_temperature'])
     exp_a = jnp.minimum(exp_a, 100.0)
-
     dist = agent.network(batch['observations'], batch['high_goals'], state_rep_grad=True, goal_rep_grad=True, method='high_actor', params=network_params)
     if agent.config['use_rep']:
         target = agent.network(targets=batch['high_targets'], bases=batch['observations'], method='value_goal_encoder')
@@ -71,7 +50,6 @@ def compute_high_actor_loss(agent, batch, network_params):
         target = batch['high_targets'] - batch['observations']
     log_probs = dist.log_prob(target)
     actor_loss = -(exp_a * log_probs).mean()
-
     return actor_loss, {
         'high_actor_loss': actor_loss,
         'high_adv': adv.mean(),
@@ -83,88 +61,63 @@ def compute_high_actor_loss(agent, batch, network_params):
 
 
 def compute_value_loss(agent, batch, network_params):
-    # masks are 0 if terminal, 1 otherwise
-    batch['masks'] = 1.0 - batch['rewards']
-    # rewards are 0 if terminal, -1 otherwise
-    batch['rewards'] = batch['rewards'] - 1.0
-
+    batch['masks'] = 1.0 - batch['rewards']  # masks are 0 if terminal, 1 otherwise
+    batch['rewards'] = batch['rewards'] - 1.0  # rewards are 0 if terminal, -1 otherwise
     (next_v1, next_v2) = agent.network(batch['next_observations'], batch['goals'], method='target_value')
     next_v = jnp.minimum(next_v1, next_v2)
     q = batch['rewards'] + agent.config['discount'] * batch['masks'] * next_v
-
-    (v1_t, v2_t) = agent.network(batch['observations'], batch['goals'], method='target_value')
-    v_t = (v1_t + v2_t) / 2
+    v_t = sum(agent.network(batch['observations'], batch['goals'], method='target_value')) / 2
     adv = q - v_t
-
     q1 = batch['rewards'] + agent.config['discount'] * batch['masks'] * next_v1
     q2 = batch['rewards'] + agent.config['discount'] * batch['masks'] * next_v2
     (v1, v2) = agent.network(batch['observations'], batch['goals'], method='value', params=network_params)
-
     value_loss1 = expectile_loss(adv, q1 - v1, agent.config['pretrain_expectile']).mean()
     value_loss2 = expectile_loss(adv, q2 - v2, agent.config['pretrain_expectile']).mean()
     value_loss = value_loss1 + value_loss2
-
-    advantage = adv
     return value_loss, {
         'value_loss': value_loss,
         'v max': v1.max(),
         'v min': v1.min(),
         'v mean': v1.mean(),
-        'abs adv mean': jnp.abs(advantage).mean(),
-        'adv mean': advantage.mean(),
-        'adv max': advantage.max(),
-        'adv min': advantage.min(),
-        'accept prob': (advantage >= 0).mean(),
+        'abs adv mean': jnp.abs(adv).mean(),
+        'adv mean': adv.mean(),
+        'adv max': adv.max(),
+        'adv min': adv.min(),
+        'accept prob': (adv >= 0).mean(),
     }
 
 
-class JointTrainAgent(iql.IQLAgent):
-    network: TrainState = None
+class JointTrainAgent(flax.struct.PyTreeNode):
+    rng: PRNGKey
+    network: TrainState
+    config: dict = flax.struct.field(pytree_node=False)
 
     def pretrain_update(agent, pretrain_batch, seed=None, value_update=True, actor_update=True, high_actor_update=True):
+        
         def loss_fn(network_params):
             info = {}
-
-            # Value
+            value_loss, actor_loss, high_actor_loss = 0., 0., 0.
             if value_update:
                 value_loss, value_info = compute_value_loss(agent, pretrain_batch, network_params)
-                for k, v in value_info.items():
-                    info[f'value/{k}'] = v
-            else:
-                value_loss = 0.
-
-            # Actor
+                info.update({f'value/{k}': v for k, v in value_info.items()})
             if actor_update:
                 actor_loss, actor_info = compute_actor_loss(agent, pretrain_batch, network_params)
-                for k, v in actor_info.items():
-                    info[f'actor/{k}'] = v
-            else:
-                actor_loss = 0.
-
-            # High Actor
+                info.update({f'actor/{k}': v for k, v in actor_info.items()})
             if high_actor_update and agent.config['use_waypoints']:
                 high_actor_loss, high_actor_info = compute_high_actor_loss(agent, pretrain_batch, network_params)
-                for k, v in high_actor_info.items():
-                    info[f'high_actor/{k}'] = v
-            else:
-                high_actor_loss = 0.
-
-            loss = value_loss + actor_loss + high_actor_loss
-
-            return loss, info
+                info.update({f'high_actor/{k}': v for k, v in high_actor_info.items()})
+            return value_loss + actor_loss + high_actor_loss, info
 
         if value_update:
             new_target_params = jax.tree_map(
-                lambda p, tp: p * agent.config['target_update_rate'] + tp * (1 - agent.config['target_update_rate']), agent.network.params['networks_value'], agent.network.params['networks_target_value']
+                lambda p, tp: p * agent.config['target_update_rate'] + tp * (1 - agent.config['target_update_rate']),
+                agent.network.params['networks_value'], agent.network.params['networks_target_value']
             )
-
         new_network, info = agent.network.apply_loss_fn(loss_fn=loss_fn, has_aux=True)
-
         if value_update:
             params = unfreeze(new_network.params)
             params['networks_target_value'] = new_target_params
             new_network = new_network.replace(params=freeze(params))
-
         return agent.replace(network=new_network), info
     pretrain_update = jax.jit(pretrain_update, static_argnames=('value_update', 'actor_update', 'high_actor_update'))
 
@@ -178,12 +131,8 @@ class JointTrainAgent(iql.IQLAgent):
                        discrete: int = 0,
                        num_samples: int = None) -> jnp.ndarray:
         dist = agent.network(observations, goals, low_dim_goals=low_dim_goals, temperature=temperature, method='actor')
-        if num_samples is None:
-            actions = dist.sample(seed=seed)
-        else:
-            actions = dist.sample(seed=seed, sample_shape=num_samples)
-        if not discrete:
-            actions = jnp.clip(actions, -1, 1)
+        actions = dist.sample(seed=seed, sample_shape=() if num_samples is None else num_samples)
+        if not discrete: actions = jnp.clip(actions, -1, 1)
         return actions
     sample_actions = jax.jit(sample_actions, static_argnames=('num_samples', 'low_dim_goals', 'discrete'))
 
@@ -195,11 +144,7 @@ class JointTrainAgent(iql.IQLAgent):
                             temperature: float = 1.0,
                             num_samples: int = None) -> jnp.ndarray:
         dist = agent.network(observations, goals, temperature=temperature, method='high_actor')
-        if num_samples is None:
-            actions = dist.sample(seed=seed)
-        else:
-            actions = dist.sample(seed=seed, sample_shape=num_samples)
-        return actions
+        return dist.sample(seed=seed, sample_shape=() if num_samples is None else num_samples)
     sample_high_actions = jax.jit(sample_high_actions, static_argnames=('num_samples',))
 
     @jax.jit
@@ -233,77 +178,46 @@ def create_learner(
         use_layer_norm: int = 0,
         rep_type: str = 'state',
         use_waypoints: int = 0,
+        sorb_hl: bool = False,
+        sorb_ll: bool = False,
         **kwargs):
 
         print('Extra kwargs:', kwargs)
-
         rng = jax.random.PRNGKey(seed)
-        rng, actor_key, high_actor_key, critic_key, value_key = jax.random.split(rng, 5)
+        rng, key = jax.random.split(rng, 2)
 
-        value_state_encoder = None
-        value_goal_encoder = None
-        policy_state_encoder = None
-        policy_goal_encoder = None
-        high_policy_state_encoder = None
-        high_policy_goal_encoder = None
+        encoders = {k: None for k in ['value_state', 'value_goal', 'policy_state', 'policy_goal', 'high_policy_state', 'high_policy_goal']}
         if visual:
             assert use_rep
             from jaxrl_m.vision import encoders
-
             visual_encoder = encoders[encoder]
             def make_encoder(bottleneck):
-                if bottleneck:
-                    return RelativeRepresentation(rep_dim=rep_dim, hidden_dims=(rep_dim,), visual=True, module=visual_encoder, layer_norm=use_layer_norm, rep_type=rep_type, bottleneck=True)
-                else:
-                    return RelativeRepresentation(rep_dim=value_hidden_dims[-1], hidden_dims=(value_hidden_dims[-1],), visual=True, module=visual_encoder, layer_norm=use_layer_norm, rep_type=rep_type, bottleneck=False)
-
-            value_state_encoder = make_encoder(bottleneck=False)
-            value_goal_encoder = make_encoder(bottleneck=use_waypoints)
-            policy_state_encoder = make_encoder(bottleneck=False)
-            policy_goal_encoder = make_encoder(bottleneck=False)
-            high_policy_state_encoder = make_encoder(bottleneck=False)
-            high_policy_goal_encoder = make_encoder(bottleneck=False)
-        else:
+                _rep_dim = rep_dim if bottleneck else value_hidden_dims[-1]
+                return RelativeRepresentation(rep_dim=_rep_dim, hidden_dims=(_rep_dim,), visual=True, module=visual_encoder,
+                                              layer_norm=use_layer_norm, rep_type=rep_type, bottleneck=bottleneck)
+            encoders = {k: make_encoder(bottleneck=use_waypoints if k=='value_goal' else False) for k in encoders}
+        elif use_rep:
             def make_encoder(bottleneck):
-                if bottleneck:
-                    return RelativeRepresentation(rep_dim=rep_dim, hidden_dims=(*value_hidden_dims, rep_dim), layer_norm=use_layer_norm, rep_type=rep_type, bottleneck=True)
-                else:
-                    return RelativeRepresentation(rep_dim=value_hidden_dims[-1], hidden_dims=(*value_hidden_dims, value_hidden_dims[-1]), layer_norm=use_layer_norm, rep_type=rep_type, bottleneck=False)
+                _rep_dim = rep_dim if bottleneck else value_hidden_dims[-1]
+                return RelativeRepresentation(rep_dim=_rep_dim, hidden_dims=(*value_hidden_dims, _rep_dim),
+                                              layer_norm=use_layer_norm, rep_type=rep_type, bottleneck=bottleneck)
+            encoders['value_goal'] = make_encoder(bottleneck=True)
 
-            if use_rep:
-                value_goal_encoder = make_encoder(bottleneck=True)
-
-        value_def = MonolithicVF(hidden_dims=value_hidden_dims, use_layer_norm=use_layer_norm, rep_dim=rep_dim)
-
+        networks = {}
+        networks['value'] = MonolithicVF(hidden_dims=value_hidden_dims, use_layer_norm=use_layer_norm, rep_dim=rep_dim)
+        networks['target_value'] = copy.deepcopy(networks['value'])
         if discrete:
             action_dim = actions[0] + 1
-            actor_def = DiscretePolicy(actor_hidden_dims, action_dim=action_dim)
+            networks['actor'] = DiscretePolicy(actor_hidden_dims, action_dim=action_dim)
         else:
             action_dim = actions.shape[-1]
-            actor_def = Policy(actor_hidden_dims, action_dim=action_dim, log_std_min=-5.0, state_dependent_std=False, tanh_squash_distribution=False)
-
+            networks['actor'] = Policy(actor_hidden_dims, action_dim=action_dim, log_std_min=-5.0, state_dependent_std=False, tanh_squash_distribution=False)
         high_action_dim = observations.shape[-1] if not use_rep else rep_dim
-        high_actor_def = Policy(actor_hidden_dims, action_dim=high_action_dim, log_std_min=-5.0, state_dependent_std=False, tanh_squash_distribution=False)
+        networks['high_actor'] = Policy(actor_hidden_dims, action_dim=high_action_dim, log_std_min=-5.0, state_dependent_std=False, tanh_squash_distribution=False)
 
-        network_def = HierarchicalActorCritic(
-            encoders={
-                'value_state': value_state_encoder,
-                'value_goal': value_goal_encoder,
-                'policy_state': policy_state_encoder,
-                'policy_goal': policy_goal_encoder,
-                'high_policy_state': high_policy_state_encoder,
-                'high_policy_goal': high_policy_goal_encoder,
-            },
-            networks={
-                'value': value_def,
-                'target_value': copy.deepcopy(value_def),
-                'actor': actor_def,
-                'high_actor': high_actor_def,
-            },
-            use_waypoints=use_waypoints,
-        )
+        network_def = HierarchicalActorCritic(encoders=encoders, networks=networks, use_waypoints=use_waypoints, sorb_hl=sorb_hl, sorb_ll=sorb_ll)
         network_tx = optax.chain(optax.zero_nans(), optax.adam(learning_rate=lr))
-        network_params = network_def.init(value_key, observations, observations)['params']
+        network_params = network_def.init(key, observations, observations)['params']
         network = TrainState.create(network_def, network_params, tx=network_tx)
         params = unfreeze(network.params)
         params['networks_target_value'] = params['networks_value']
@@ -316,4 +230,4 @@ def create_learner(
             use_rep=use_rep, use_waypoints=use_waypoints,
         ))
 
-        return JointTrainAgent(rng, network=network, critic=None, value=None, target_value=None, actor=None, config=config)
+        return JointTrainAgent(rng, network=network, config=config)
