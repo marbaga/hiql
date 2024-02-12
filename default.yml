@@ -1,0 +1,54 @@
+env_name: antmaze-large-diverse-v2
+working_dir: results
+seed: 1
+eval_episodes: 50
+num_video_episodes: 2
+log_interval: 1000
+eval_interval: 100000
+save_interval: 100000
+batch_size: 1024
+pretrain_steps: 1000002 #0
+discount: 0.99
+
+use_layer_norm: true
+value_hidden_dim: 512
+value_num_layers: 3
+use_rep: true # false
+rep_dim: 10 # null
+rep_type: concat # state  # state, diff, concat
+policy_train_rep: false
+use_waypoints: true # false
+way_steps: 25 # 1
+
+pretrain_expectile: 0.7
+p_randomgoal: 0.3
+p_trajgoal: 0.5
+p_currgoal: 0.2
+high_p_randomgoal: 0.3 # 0.
+geom_sample: 1
+temperature: 1
+high_temperature: 1
+
+visual: false
+encoder: impala
+
+hl_sorb: false
+ll_sorb: false
+
+config:
+  lr: 3.e-4
+  actor_hidden_dims: [256, 256]
+  value_hidden_dims: [256, 256]
+  discount: 0.99
+  temperature: 1.0
+  tau: 0.005
+  pretrain_expectile: 0.7
+
+gcdataset:
+  p_randomgoal: 0.3
+  p_trajgoal: 0.5
+  p_currgoal: 0.2
+  geom_sample: 0
+  reward_scale: 1.0
+  reward_shift: 0.0
+  terminal: False

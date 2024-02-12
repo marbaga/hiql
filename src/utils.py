@@ -1,72 +1,11 @@
 from typing import Iterable, Optional
-
+import os
 import numpy as np
 import jax.numpy as jnp
 import wandb
+from aim import Run
 
 Array = jnp.ndarray
-
-
-def interp2d(
-    x: Array,
-    y: Array,
-    xp: Array,
-    yp: Array,
-    zp: Array,
-    fill_value: Optional[Array] = None,
-) -> Array:
-    """
-    Adopted from https://github.com/adam-coogan/jaxinterp2d
-
-    Bilinear interpolation on a grid. ``CartesianGrid`` is much faster if the data
-    lies on a regular grid.
-    Args:
-        x, y: 1D arrays of point at which to interpolate. Any out-of-bounds
-            coordinates will be clamped to lie in-bounds.
-        xp, yp: 1D arrays of points specifying grid points where function values
-            are provided.
-        zp: 2D array of function values. For a function `f(x, y)` this must
-            satisfy `zp[i, j] = f(xp[i], yp[j])`
-    Returns:
-        1D array `z` satisfying `z[i] = f(x[i], y[i])`.
-    """
-    if xp.ndim != 1 or yp.ndim != 1:
-        raise ValueError("xp and yp must be 1D arrays")
-    if zp.shape != (xp.shape + yp.shape):
-        raise ValueError("zp must be a 2D array with shape xp.shape + yp.shape")
-    x = jnp.asarray(x)
-    y = jnp.asarray(y)
-    xp = jnp.asarray(xp)
-    yp = jnp.asarray(yp)
-    zp = jnp.asarray(zp)
-
-    ix = jnp.clip(jnp.searchsorted(xp, x, side="right"), 1, len(xp) - 1)
-    iy = jnp.clip(jnp.searchsorted(yp, y, side="right"), 1, len(yp) - 1)
-
-    # Using Wikipedia's notation (https://en.wikipedia.org/wiki/Bilinear_interpolation)
-    z_11 = zp[ix - 1, iy - 1]
-    z_21 = zp[ix, iy - 1]
-    z_12 = zp[ix - 1, iy]
-    z_22 = zp[ix, iy]
-
-    z_xy1 = (xp[ix] - x) / (xp[ix] - xp[ix - 1]) * z_11 + (x - xp[ix - 1]) / (
-        xp[ix] - xp[ix - 1]
-    ) * z_21
-    z_xy2 = (xp[ix] - x) / (xp[ix] - xp[ix - 1]) * z_12 + (x - xp[ix - 1]) / (
-        xp[ix] - xp[ix - 1]
-    ) * z_22
-
-    z = (yp[iy] - y) / (yp[iy] - yp[iy - 1]) * z_xy1 + (y - yp[iy - 1]) / (
-        yp[iy] - yp[iy - 1]
-    ) * z_xy2
-
-    if fill_value is not None:
-        oob = jnp.logical_or(
-            x < xp[0], jnp.logical_or(x > xp[-1], jnp.logical_or(y < yp[0], y > yp[-1]))
-        )
-        z = jnp.where(oob, fill_value, z)
-
-    return z
 
 
 def prepare_video(v, n_cols=None):
@@ -111,21 +50,8 @@ def save_video(label, step, tensor, fps=15, n_cols=None):
         tensor = prepare_video(tensor, n_cols)
         tensor = _to_uint8(tensor)
 
-    # Encode sequence of images into gif string
-    # clip = mpy.ImageSequenceClip(list(tensor), fps=fps)
-
-    # plot_path = (pathlib.Path(logger.get_snapshot_dir())
-    #              / 'plots'
-    #              / f'{label}_{step}.mp4')
-    # plot_path.parent.mkdir(parents=True, exist_ok=True)
-    #
-    # clip.write_videofile(str(plot_path), audio=False, verbose=False, logger=None)
-
-
-    # tensor: (t, h, w, c)
     tensor = tensor.transpose(0, 3, 1, 2)
     return wandb.Video(tensor, fps=15, format='mp4')
-    # logger.record_video(label, str(plot_path))
 
 
 def record_video(label, step, renders=None, n_cols=None, skip_frames=1):
@@ -137,27 +63,28 @@ def record_video(label, step, renders=None, n_cols=None, skip_frames=1):
     return save_video(label, step, renders, n_cols=n_cols)
 
 
-class CsvLogger:
-    def __init__(self, path):
-        self.path = path
-        self.header = None
-        self.file = None
+class Logger:
+    def __init__(self, kwargs):
+        self.kwargs = kwargs
+        self.path = {k: os.path.join(kwargs.working_dir, f'{k}.csv') for k in ['train', 'eval']}
+        self.header = {'train': None, 'eval': None}
+        self.file = {'train': None, 'eval': None}
         self.disallowed_types = (wandb.Image, wandb.Video, wandb.Histogram)
+        self.run = Run(repo = kwargs.working_dir, experiment='test')
+        self.run['hparams'] = kwargs.to_dict()
 
-    def log(self, row, step):
+    def log(self, row, step, mode='eval'):
+        assert mode in ['eval', 'train']
         row['step'] = step
-        if self.file is None:
-            self.file = open(self.path, 'w')
-            if self.header is None:
-                self.header = [k for k, v in row.items() if not isinstance(v, self.disallowed_types)]
-                self.file.write(','.join(self.header) + '\n')
-            filtered_row = {k: v for k, v in row.items() if not isinstance(v, self.disallowed_types)}
-            self.file.write(','.join([str(filtered_row.get(k, '')) for k in self.header]) + '\n')
-        else:
-            filtered_row = {k: v for k, v in row.items() if not isinstance(v, self.disallowed_types)}
-            self.file.write(','.join([str(filtered_row.get(k, '')) for k in self.header]) + '\n')
-        self.file.flush()
+        if self.file[mode] is None:
+            self.file[mode] = open(self.path[mode], 'w')
+            if self.header[mode] is None:
+                self.header[mode] = [k for k, v in row.items() if not isinstance(v, self.disallowed_types)]
+                self.file[mode].write(','.join(self.header[mode]) + '\n')
+        filtered_row = {k: v for k, v in row.items() if not isinstance(v, self.disallowed_types)}
+        [self.run.track(v, name=k) for k, v in filtered_row.items()]
+        self.file[mode].write(','.join([str(filtered_row.get(k, '')) for k in self.header[mode]]) + '\n')
+        self.file[mode].flush()
 
     def close(self):
-        if self.file is not None:
-            self.file.close()
+        [f.close() for f in self.file.values() if f is not None]

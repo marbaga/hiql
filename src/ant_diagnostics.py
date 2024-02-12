@@ -3,24 +3,18 @@ Very specific code for debugging the antmaze environment.
 """
 import matplotlib
 matplotlib.use('Agg')
-from matplotlib import patches
 
 import matplotlib.pyplot as plt
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
-from functools import partial
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-import gym
-import d4rl
 import numpy as np
 import functools as ft
 
 # from src import roomworld_utils
 from .d4rl_ant import get_canvas_image
-from jaxrl_m.dataset import Dataset
-import os
 import os.path as osp
 
 class Visualizer:

@@ -4,10 +4,9 @@ from flax.core import freeze
 import dataclasses
 import numpy as np
 import jax
-import ml_collections
 
 @dataclasses.dataclass
-class GCDataset:
+class GCSDataset:
     dataset: Dataset
     p_randomgoal: float
     p_trajgoal: float
@@ -18,18 +17,8 @@ class GCDataset:
     reward_scale: float = 1.0
     reward_shift: float = -1.0
     terminal: bool = True
-
-    @staticmethod
-    def get_default_config():
-        return ml_collections.ConfigDict({
-            'p_randomgoal': 0.3,
-            'p_trajgoal': 0.5,
-            'p_currgoal': 0.2,
-            'geom_sample': 0,
-            'reward_scale': 1.0,
-            'reward_shift': -1.0,
-            'terminal': True,
-        })
+    way_steps: int = None
+    high_p_randomgoal: float = 0.
 
     def __post_init__(self):
         self.terminal_locs, = np.nonzero(self.dataset[self.terminal_key] > 0)
@@ -62,40 +51,6 @@ class GCDataset:
         # Goals at the current state
         goal_indx = np.where(np.random.rand(batch_size) < p_currgoal, indx, goal_indx)
         return goal_indx
-
-    def sample(self, batch_size: int, indx=None):
-        if indx is None:
-            indx = np.random.randint(self.dataset.size-1, size=batch_size)
-        
-        batch = self.dataset.sample(batch_size, indx)
-        goal_indx = self.sample_goals(indx)
-
-        success = (indx == goal_indx)
-        batch['rewards'] = success.astype(float) * self.reward_scale + self.reward_shift
-        if self.terminal:
-            batch['masks'] = (1.0 - success.astype(float))
-        else:
-            batch['masks'] = np.ones(batch_size)
-        batch['goals'] = jax.tree_map(lambda arr: arr[goal_indx], self.dataset['observations'])
-
-        return batch
-
-@dataclasses.dataclass
-class GCSDataset(GCDataset):
-    way_steps: int = None
-    high_p_randomgoal: float = 0.
-
-    @staticmethod
-    def get_default_config():
-        return ml_collections.ConfigDict({
-            'p_randomgoal': 0.3,
-            'p_trajgoal': 0.5,
-            'p_currgoal': 0.2,
-            'geom_sample': 0,
-            'reward_scale': 1.0,
-            'reward_shift': 0.0,
-            'terminal': False,
-        })
 
     def sample(self, batch_size: int, indx=None):
         if indx is None:
