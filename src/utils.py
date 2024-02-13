@@ -68,7 +68,7 @@ class Logger:
         self.header = {'train': None, 'eval': None}
         self.file = {'train': None, 'eval': None}
         self.disallowed_types = (aim.Image, aim.Distribution)
-        self.run = aim.Run(repo = kwargs.working_dir, experiment='test')
+        self.run = aim.Run(repo='/is/sg2/mbagatella/aim_repo/hiql', experiment=kwargs.working_dir)
         self.run['hparams'] = kwargs.to_dict()
 
     def log(self, row, step, mode='eval'):

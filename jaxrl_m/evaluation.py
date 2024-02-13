@@ -138,6 +138,7 @@ def evaluate_with_trajectories(
                     return dist
 
                 distances = np.asarray(distances)  # huge speedup somehow
+                distances = np.maximum(distances, 0)
                 # density = np.exp(-(np.log(-np.stack(distances, 0)) / np.log(0.99)).clip(None, 500) / 20.0).mean(0)
                 # p = 1/density
                 # density_p = p/p.sum()
