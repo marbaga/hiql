@@ -2,7 +2,7 @@ optimization_procedure_name: test_sorb_v0
 results_dir: /fast/mbagatella/results/hiql
 run_in_working_dir: false
 git_params:
-  branch: main
+  branch: master
   commit: null
 script_relative_path: main.py
 environment_setup:
@@ -11,7 +11,8 @@ cluster_requirements:
   request_cpus: 2
   memory_in_mb: 32000
   request_gpus: 1
-  gpu_memory_in_mb: 12000
+  gpu_memory_in_mb: 40000
+  cuda_requirement: ">7.0"
   bid: 25
   forbidden_hostnames: []
   extra_submission_options:
