@@ -155,6 +155,12 @@ class JointTrainAgent(flax.struct.PyTreeNode):
                        ) -> jnp.ndarray:
         return agent.network(targets=targets, bases=bases, method='policy_goal_encoder')
 
+    @jax.jit
+    def value(agent,
+              observations: np.ndarray,
+              goals: np.ndarray) -> jnp.ndarray:
+        return agent.network(observations, goals, method='value')
+
 
 def create_learner(
         seed: int,

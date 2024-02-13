@@ -1,0 +1,46 @@
+optimization_procedure_name: test_sorb_v0
+results_dir: /fast/mbagatella/results/hiql
+run_in_working_dir: false
+git_params:
+  branch: main
+  commit: null
+script_relative_path: main.py
+environment_setup:
+  pre_job_script: cluster_setup.sh
+cluster_requirements:
+  request_cpus: 8
+  memory_in_mb: 32000
+  request_gpus: 0
+  bid: 25
+  forbidden_hostnames: []
+  extra_submission_options:
+    request_disk: 20G
+remove_jobs_dir: false
+restarts: 1
+fixed_params:
+  __import_promise__: default.yml
+  env_name: antmaze-large-diverse-v2
+  pretrain_steps: 1000002
+  eval_interval: 100000
+  save_interval: 250000
+  p_currgoal: 0.2
+  p_trajgoal: 0.5
+  p_randomgoal: 0.3
+  discount: 0.99
+  geom_sample: 1
+  use_layer_norm: true
+  value_hidden_dim: 512
+  value_num_layers: 3
+  batch_size: 1024
+  use_rep: false
+  policy_train_rep: false
+  high_p_randomgoal: 0.3
+hyperparam_list:
+  - param: [temperature, high_temperature, pretrain_expectile]
+    values: [[1, 1, 0.7], [3, 3, 0.9]]
+  - param: [use_waypoints, way_steps]
+    values: [[0, 1], [1, 25]]
+  - param: hl_sorb
+    values: [true, false]
+  - param: seed
+    values: [0, 1, 2, 3, 4]

@@ -4,6 +4,7 @@ import gym
 import numpy as np
 from collections import defaultdict
 import time
+import jax.numpy as jnp
 
 
 def supply_rng(f, rng=jax.random.PRNGKey(0)):
@@ -53,7 +54,7 @@ def kitchen_render(kitchen_env, wh=64):
 
 
 def evaluate_with_trajectories(
-        policy_fn, high_policy_fn, policy_rep_fn, env: gym.Env, env_name, num_episodes: int, base_observation=None, num_video_episodes=0,
+        policy_fn, high_policy_fn, policy_rep_fn, value_fn, pretrain_dataset, env: gym.Env, env_name, num_episodes: int, base_observation=None, num_video_episodes=0,
         use_waypoints=False, eval_temperature=0, epsilon=0, goal_info=None,
         config=None,
 ) -> Dict[str, float]:
@@ -99,22 +100,79 @@ def evaluate_with_trajectories(
         else:
             raise NotImplementedError
 
+        if config['hl_sorb']:
+
+            if 'antmaze' in env_name:
+                _sample = pretrain_dataset.sample(1000)['observations']
+                _sample[0] = observation.copy()
+                _sample[-1] = obs_goal.copy()
+                _sample[:, 2:] = base_observation.copy()[2:]
+                _bs = 10
+                distances = []
+                for i in range(_sample.shape[0]//_bs):
+                    _obs = jnp.repeat(_sample[i*_bs:(i+1)*_bs], _sample.shape[0], axis=0)
+                    _goals = jnp.tile(_sample, (_bs, 1))
+                    distance = - sum(value_fn(observations=_obs, goals=_goals)) / 2
+                    # TODO: remove line below
+                    distance = jnp.sqrt(((_obs[:, :2] - _goals[:, :2])**2).sum(-1))
+                    distances.append(distance)
+                distances = jnp.concatenate(distances, 0).reshape(_sample.shape[0], -1)
+
+                import networkx as nx
+                from heapq import heappop, heappush
+                from itertools import count
+                import numpy as np
+                def maximum_edge_length(G, source):
+                    dist, seen = {}, {source: 0}
+                    c = count()
+                    fringe = [(0, next(c), source)]
+                    while fringe:
+                        (d, _, v) = heappop(fringe)
+                        if v in dist: continue  # already searched this node.
+                        dist[v] = d
+                        for u, e in G._adj[v].items():
+                            if e.get('weight') is None: continue
+                            vu_dist = max(dist[v], e.get('weight'))
+                            if u in dist and dist[u] > vu_dist:
+                                raise ValueError("Contradictory paths found:", "negative weights?")
+                            if u not in seen or vu_dist < seen[u]:
+                                seen[u] = vu_dist
+                                heappush(fringe, (vu_dist, next(c), u))
+                    return dist
+
+                distances = np.asarray(distances)  # huge speedup somehow
+                # density = np.exp(-(np.log(-np.stack(distances, 0)) / np.log(0.99)).clip(None, 500) / 20.0).mean(0)
+                # p = 1/density
+                # density_p = p/p.sum()
+                graph = nx.from_numpy_array(distances, parallel_edges=False, create_using=nx.DiGraph)
+                edge_weights = nx.get_edge_attributes(graph,'weight')
+                goal_id = len(distances) - 1
+                lengths = maximum_edge_length(graph.reverse(), goal_id)
+                graph.remove_edges_from((e for e, w in edge_weights.items() if w > lengths[0]))
+                distances_on_graph = nx.shortest_path_length(graph, target=goal_id, weight='weight')
+                shortest_paths = nx.shortest_path(graph, target=goal_id, weight='weight')
+                sample_to_goal = np.asarray([(distances_on_graph[k] if k in distances_on_graph else 1000) for k in range(len(_sample))])
+                sample_subgoals = np.asarray([shortest_paths[k][min(2, len(shortest_paths[k])-1)] if k in shortest_paths else 999 for k in range(len(_sample))])
+            else:
+                raise NotImplementedError
+
         render = []
         step = 0
         while not done:
             if not use_waypoints:
-                cur_obs_goal = obs_goal
-                if config['use_rep']:
-                    cur_obs_goal_rep = policy_rep_fn(targets=cur_obs_goal, bases=observation)
-                else:
-                    cur_obs_goal_rep = cur_obs_goal
+                cur_obs_goal_rep = policy_rep_fn(targets=obs_goal, bases=observation) if config['use_rep'] else obs_goal
             else:
                 cur_obs_goal = high_policy_fn(observations=observation, goals=obs_goal, temperature=eval_temperature)
                 if config['use_rep']:
-                    cur_obs_goal = cur_obs_goal / np.linalg.norm(cur_obs_goal, axis=-1, keepdims=True) * np.sqrt(cur_obs_goal.shape[-1])
+                    cur_obs_goal_rep = cur_obs_goal / np.linalg.norm(cur_obs_goal, axis=-1, keepdims=True) * np.sqrt(cur_obs_goal.shape[-1])
                 else:
-                    cur_obs_goal = observation + cur_obs_goal
-                cur_obs_goal_rep = cur_obs_goal
+                    cur_obs_goal_rep = observation + cur_obs_goal
+
+            if config['hl_sorb']:
+                dist_to_sample = - sum(value_fn(observations=jnp.tile(observation, (_sample.shape[0], 1)), goals=_sample)) / 2
+                idx = jnp.argmin(dist_to_sample+sample_to_goal).item()
+                obs_goal = _sample[sample_subgoals[idx]].copy()
+                cur_obs_goal_rep = policy_rep_fn(targets=obs_goal, bases=observation) if config['use_rep'] else obs_goal
 
             action = policy_fn(observations=observation, goals=cur_obs_goal_rep, low_dim_goals=True, temperature=eval_temperature)
             if 'antmaze' in env_name:

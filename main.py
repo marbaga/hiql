@@ -92,13 +92,15 @@ def main(**kwargs):
         if i == 1 or i % kwargs.eval_interval == 0:
             policy_fn = partial(supply_rng(agent.sample_actions), discrete=discrete)
             high_policy_fn = partial(supply_rng(agent.sample_high_actions))
+            value_fn = agent.value
             policy_rep_fn = agent.get_policy_rep
             base_observation = jax.tree_map(lambda arr: arr[0], pretrain_dataset.dataset['observations'])
             if 'procgen' in kwargs.env_name:
                 eval_metrics = {}
                 for goal_info in goal_infos:
                     eval_info, trajs, _ = evaluate_with_trajectories(
-                        policy_fn, high_policy_fn, policy_rep_fn, env, env_name=kwargs.env_name, num_episodes=kwargs.eval_episodes,
+                        policy_fn, high_policy_fn, policy_rep_fn, value_fn, pretrain_dataset,
+                        env, env_name=kwargs.env_name, num_episodes=kwargs.eval_episodes,
                         base_observation=base_observation, num_video_episodes=0,
                         use_waypoints=kwargs.use_waypoints,
                         eval_temperature=0, epsilon=0.05,
@@ -107,7 +109,8 @@ def main(**kwargs):
                     eval_metrics.update({f'evaluation/level{goal_info["eval_level_name"]}_{k}': v for k, v in eval_info.items()})
             else:
                 eval_info, trajs, _ = evaluate_with_trajectories(
-                    policy_fn, high_policy_fn, policy_rep_fn, env, env_name=kwargs.env_name, num_episodes=kwargs.eval_episodes,
+                    policy_fn, high_policy_fn, policy_rep_fn, value_fn, pretrain_dataset,
+                    env, env_name=kwargs.env_name, num_episodes=kwargs.eval_episodes,
                     base_observation=base_observation, num_video_episodes=kwargs.num_video_episodes,
                     use_waypoints=kwargs.use_waypoints,
                     eval_temperature=0,
