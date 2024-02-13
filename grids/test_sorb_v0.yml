@@ -8,9 +8,10 @@ script_relative_path: main.py
 environment_setup:
   pre_job_script: cluster_setup.sh
 cluster_requirements:
-  request_cpus: 8
+  request_cpus: 2
   memory_in_mb: 32000
-  request_gpus: 0
+  request_gpus: 1
+  gpu_memory_in_mb: 12000
   bid: 25
   forbidden_hostnames: []
   extra_submission_options:

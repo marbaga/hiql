@@ -14,6 +14,7 @@ rm /tmp/v_hiql_$$.tar
 sed -i "s#/lustre/home/mbagatella/hiql/v_hiql#/tmp/v_hiql_$$#" /tmp/v_hiql_$$/bin/activate
 sed -i "s#/lustre/home/mbagatella/hiql/v_hiql#/tmp/v_hiql_$$#" /tmp/v_hiql_$$/bin/pip
 . /tmp/v_hiql_$$/bin/activate
-export LD_LIBRARY_PATH=/is/software/nvidia/cudnn-8.6.0-cu11.7/lib:/is/software/nvidia/cuda-11.7/lib64:/is/cluster/fast/mbagatella/.mujoco/mujoco210/bin
+export LD_LIBRARY_PATH=/is/software/nvidia/cudnn-8.6.0-cu11.7/lib:/is/software/nvidia/cuda-11.7/lib64:/fast/mbagatella/.mujoco/mujoco210/bin
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/lib/nvidia
 export XLA_PYTHON_CLIENT_MEM_FRACTION=.8
+export PATH=$PATH:/is/software/nvidia/cuda-11.7/bin

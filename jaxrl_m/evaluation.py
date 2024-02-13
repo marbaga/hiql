@@ -113,15 +113,12 @@ def evaluate_with_trajectories(
                     _obs = jnp.repeat(_sample[i*_bs:(i+1)*_bs], _sample.shape[0], axis=0)
                     _goals = jnp.tile(_sample, (_bs, 1))
                     distance = - sum(value_fn(observations=_obs, goals=_goals)) / 2
-                    # TODO: remove line below
-                    distance = jnp.sqrt(((_obs[:, :2] - _goals[:, :2])**2).sum(-1))
                     distances.append(distance)
                 distances = jnp.concatenate(distances, 0).reshape(_sample.shape[0], -1)
 
                 import networkx as nx
                 from heapq import heappop, heappush
                 from itertools import count
-                import numpy as np
                 def maximum_edge_length(G, source):
                     dist, seen = {}, {source: 0}
                     c = count()
